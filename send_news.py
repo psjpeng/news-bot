@@ -39,14 +39,13 @@ def get_weather():
 
 # ==================== 新闻 ====================
 NEWS_SOURCES_DOMESTIC = [
-    {"name": "澎湃新闻", "url": "https://www.thepaper.cn/rss.xml"},
-    {"name": "新华网", "url": "http://www.xinhuanet.com/politics/xhll.xml"},
-    {"name": "环球网国内", "url": "https://www.huanqiu.com/rss/china.xml"},
+    {"name": "人民网", "url": "http://www.people.com.cn/rss/politics.xml"},
+    {"name": "人民网社会", "url": "http://www.people.com.cn/rss/society.xml"},
+    {"name": "新浪新闻", "url": "https://rss.sina.com.cn/news/marquee/ddt.xml"},
 ]
 
 NEWS_SOURCES_INTERNATIONAL = [
-    {"name": "环球网国际", "url": "https://www.huanqiu.com/rss/world.xml"},
-    {"name": "参考消息", "url": "https://www.cankaoxiaoxi.com/rss/world.xml"},
+    {"name": "人民网国际", "url": "http://www.people.com.cn/rss/world.xml"},
 ]
 
 def to_simplified(text):
