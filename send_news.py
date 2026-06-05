@@ -56,6 +56,23 @@ def to_simplified(text):
             pass
     return text
 
+def smart_truncate(text, max_chars=50):
+    """在句末标点处截断，避免砍断句子"""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    snippet = text[:max_chars]
+    # 从后往前找第一个句末标点
+    for i in range(len(snippet) - 1, -1, -1):
+        if snippet[i] in '。！？.!?':
+            return snippet[:i + 1]
+    # 找不到就找逗号
+    for i in range(len(snippet) - 1, -1, -1):
+        if snippet[i] in '，,；;':
+            return snippet[:i + 1]
+    # 都没有就返回 max_chars
+    return snippet
+
 def fetch_news(sources, max_items=6):
     all_items = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
@@ -73,12 +90,13 @@ def fetch_news(sources, max_items=6):
                 desc = entry.get("description", "") or entry.get("summary", "")
                 desc = html.unescape(desc)
                 desc = re.sub(r'<[^>]+>', '', desc)
-                desc = to_simplified(desc.strip()[:50])
+                desc = to_simplified(desc.strip())
+                desc = smart_truncate(desc, 50)
                 if not desc:
                     desc = title[:50]
                 if title and link:
                     all_items.append({
-                        "title": title[:40],
+                        "title": title[:30],
                         "link": link,
                         "summary": desc,
                         "source": source["name"],
