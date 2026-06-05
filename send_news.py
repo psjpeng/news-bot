@@ -56,7 +56,7 @@ def to_simplified(text):
             pass
     return text
 
-def fetch_news(sources, max_items=5):
+def fetch_news(sources, max_items=10):
     all_items = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
 
@@ -125,18 +125,18 @@ def main():
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday_str = weekdays[now.weekday()]
 
-    print(f"⏰ 执行时间: {date_str} {weekday_str}")
+    print(f"执行时间: {date_str} {weekday_str}")
 
-    print("🌤 获取天气...")
+    print("获取天气...")
     weather = get_weather()
     print(f"   天气: {weather}")
 
-    print("📰 获取国内新闻...")
-    domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=5)
+    print("获取国内新闻...")
+    domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=10)
     print(f"   国内: {len(domestic)} 条")
 
-    print("🌍 获取国际新闻...")
-    international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=5)
+    print("获取国际新闻...")
+    international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=10)
     print(f"   国际: {len(international)} 条")
 
     blessing = get_blessing()
@@ -144,27 +144,27 @@ def main():
     domestic_text = format_news_items(domestic)
     international_text = format_news_items(international)
 
-    markdown_content = f"""## 📰 彭先生早报 | {date_str} {weekday_str}
----
-👋 **早上好！今天又是能量满满的一天**
+    markdown_content = f"""## 彭先生早报 | {date_str} {weekday_str}
 
-🌤 **今日天气**：{weather}
+**早上好！今天又是能量满满的一天**
 
-### 🇨🇳 国内要闻
+今日天气: {weather}
+
+**国内要闻**
 {domestic_text}
 
-### 🌍 国际要闻
+**国际要闻**
 {international_text}
 
 ---
-> 🌟 {blessing}
-> 🕖 每日 7:00 自动推送 | 新闻小助手"""
+> {blessing}
+> 每日 7:00 自动推送 | 新闻小助手"""
 
     content_bytes = markdown_content.encode("utf-8")
     if len(content_bytes) > 4000:
         markdown_content = content_bytes[:4000].decode("utf-8", errors="ignore")
 
-    print("📤 发送到企业微信...")
+    print("发送到企业微信...")
     payload = {"msgtype": "markdown", "markdown": {"content": markdown_content}}
 
     try:
@@ -172,11 +172,11 @@ def main():
         result = resp.json()
         print(f"   结果: {result}")
         if result.get("errcode") == 0:
-            print("✅ 推送成功！")
+            print("推送成功！")
         else:
-            print(f"❌ 推送失败: {result}")
+            print(f"推送失败: {result}")
     except Exception as e:
-        print(f"❌ 发送异常: {e}")
+        print(f"发送异常: {e}")
 
 if __name__ == "__main__":
     main()
