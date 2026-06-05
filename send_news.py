@@ -12,14 +12,18 @@ import re
 import html
 from datetime import timezone, timedelta
 
+try:
+    import zhconv
+except ImportError:
+    zhconv = None
+
 # ==================== 配置 ====================
 WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=5fafe6e6-bbc8-49fc-bb53-96c6dfc18d0b"
 CITY = "Beijing"
-TZ = timezone(timedelta(hours=8))  # 北京时间
+TZ = timezone(timedelta(hours=8))
 
 # ==================== 天气 ====================
 def get_weather():
-    """通过 wttr.in 获取天气"""
     try:
         url = f"https://wttr.in/{CITY}?format=%C+%t+%w&lang=zh"
         headers = {"User-Agent": "curl/7.0"}
@@ -35,18 +39,25 @@ def get_weather():
 
 # ==================== 新闻 ====================
 NEWS_SOURCES_DOMESTIC = [
-    {"name": "BBC中文", "url": "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"},
-    {"name": "联合早报", "url": "https://www.zaobao.com.sg/zh-cn/news/china/rss.xml"},
     {"name": "澎湃新闻", "url": "https://www.thepaper.cn/rss.xml"},
+    {"name": "新华网", "url": "http://www.xinhuanet.com/politics/xhll.xml"},
+    {"name": "环球网国内", "url": "https://www.huanqiu.com/rss/china.xml"},
 ]
 
 NEWS_SOURCES_INTERNATIONAL = [
-    {"name": "BBC News", "url": "http://feeds.bbci.co.uk/news/rss.xml"},
-    {"name": "Google News", "url": "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"},
+    {"name": "环球网国际", "url": "https://www.huanqiu.com/rss/world.xml"},
+    {"name": "参考消息", "url": "https://www.cankaoxiaoxi.com/rss/world.xml"},
 ]
 
+def to_simplified(text):
+    if zhconv and text:
+        try:
+            return zhconv.convert(text, 'zh-cn')
+        except Exception:
+            pass
+    return text
+
 def fetch_news(sources, max_items=5):
-    """从 RSS 源抓取新闻"""
     all_items = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
 
@@ -58,11 +69,12 @@ def fetch_news(sources, max_items=5):
             feed = feedparser.parse(resp.content)
             for entry in feed.entries[:max_items]:
                 title = html.unescape(entry.get("title", "").strip())
+                title = to_simplified(title)
                 link = entry.get("link", "")
                 desc = entry.get("description", "") or entry.get("summary", "")
                 desc = html.unescape(desc)
                 desc = re.sub(r'<[^>]+>', '', desc)
-                desc = desc.strip()[:50]
+                desc = to_simplified(desc.strip()[:50])
                 if not desc:
                     desc = title[:50]
                 if title and link:
@@ -91,7 +103,7 @@ def format_news_items(items):
         return "> _暂无新闻数据_"
     lines = []
     for i, item in enumerate(items):
-        lines.append(f"{i+1}. [{item['title']}]({item['link']})：{item['summary']}")
+        lines.append(f"{i+1}. {item['title']}：{item['summary']} [【查看详情】]({item['link']})")
     return "\n".join(lines)
 
 # ==================== 祝福语 ====================
@@ -116,12 +128,10 @@ def main():
 
     print(f"⏰ 执行时间: {date_str} {weekday_str}")
 
-    # 1. 天气
     print("🌤 获取天气...")
     weather = get_weather()
     print(f"   天气: {weather}")
 
-    # 2. 新闻
     print("📰 获取国内新闻...")
     domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=5)
     print(f"   国内: {len(domestic)} 条")
@@ -130,10 +140,8 @@ def main():
     international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=5)
     print(f"   国际: {len(international)} 条")
 
-    # 3. 祝福语
     blessing = get_blessing()
 
-    # 4. 组装
     domestic_text = format_news_items(domestic)
     international_text = format_news_items(international)
 
@@ -153,12 +161,10 @@ def main():
 > 🌟 {blessing}
 > 🕖 每日 7:00 自动推送 | 新闻小助手"""
 
-    # 控制长度
     content_bytes = markdown_content.encode("utf-8")
     if len(content_bytes) > 4000:
         markdown_content = content_bytes[:4000].decode("utf-8", errors="ignore")
 
-    # 5. 发送
     print("📤 发送到企业微信...")
     payload = {"msgtype": "markdown", "markdown": {"content": markdown_content}}
 
