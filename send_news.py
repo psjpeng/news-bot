@@ -193,6 +193,7 @@ def main():
             print("推送成功！")
         else:
             print(f"推送失败: {result}")
+            exit(1)
     except Exception as e:
         print(f"发送异常: {e}")
 
