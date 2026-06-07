@@ -39,13 +39,13 @@ def get_weather():
 
 # ==================== 新闻 ====================
 NEWS_SOURCES_DOMESTIC = [
-    {"name": "人民网", "url": "http://www.people.com.cn/rss/politics.xml"},
-    {"name": "人民网社会", "url": "http://www.people.com.cn/rss/society.xml"},
-    {"name": "新浪新闻", "url": "https://rss.sina.com.cn/news/marquee/ddt.xml"},
+    {"name": "澎湃新闻", "url": "https://www.thepaper.cn/rss.jsp"},
+    {"name": "央视新闻", "url": "https://news.cctv.com/data/rss_news.xml"},
+    {"name": "新华网", "url": "http://www.xinhuanet.com/politics/news_politics.xml"},
 ]
 
 NEWS_SOURCES_INTERNATIONAL = [
-    {"name": "人民网国际", "url": "http://www.people.com.cn/rss/world.xml"},
+    {"name": "澎湃国际", "url": "https://www.thepaper.cn/rss.jsp"},
 ]
 
 def to_simplified(text):
@@ -62,15 +62,12 @@ def smart_truncate(text, max_chars=50):
     if len(text) <= max_chars:
         return text
     snippet = text[:max_chars]
-    # 从后往前找第一个句末标点
     for i in range(len(snippet) - 1, -1, -1):
         if snippet[i] in '。！？.!?':
             return snippet[:i + 1]
-    # 找不到就找逗号
     for i in range(len(snippet) - 1, -1, -1):
         if snippet[i] in '，,；;':
             return snippet[:i + 1]
-    # 都没有就返回 max_chars
     return snippet
 
 def fetch_news(sources, max_items=6):
@@ -83,7 +80,8 @@ def fetch_news(sources, max_items=6):
             if resp.status_code != 200:
                 continue
             feed = feedparser.parse(resp.content)
-            for entry in feed.entries[:max_items]:
+            print(f"   源 [{source['name']}] 获取到 {len(feed.entries)} 条")
+            for entry in feed.entries[:max_items * 2]:
                 title = html.unescape(entry.get("title", "").strip())
                 title = to_simplified(title)
                 link = entry.get("link", "")
@@ -101,7 +99,8 @@ def fetch_news(sources, max_items=6):
                         "summary": desc,
                         "source": source["name"],
                     })
-        except Exception:
+        except Exception as e:
+            print(f"   源 [{source['name']}] 抓取失败: {e}")
             continue
 
     seen = set()
@@ -196,6 +195,7 @@ def main():
             exit(1)
     except Exception as e:
         print(f"发送异常: {e}")
+        exit(1)
 
 if __name__ == "__main__":
     main()
