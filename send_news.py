@@ -40,18 +40,7 @@ def get_weather():
         print(f"   天气获取失败: {e}")
         return "天气数据获取中"
 
-# ==================== 新闻 ====================
-NEWS_SOURCES_DOMESTIC = [
-    {"name": "人民网政治", "url": "http://www.people.com.cn/rss/politics.xml"},
-    {"name": "人民网社会", "url": "http://www.people.com.cn/rss/society.xml"},
-    {"name": "澎湃新闻",   "url": "https://www.thepaper.cn/rss.jsp"},
-]
-
-NEWS_SOURCES_INTERNATIONAL = [
-    {"name": "人民网国际", "url": "http://www.people.com.cn/rss/world.xml"},
-    {"name": "联合早报中国", "url": "https://www.zaobao.com.sg/rss/realtime/china"},
-]
-
+# ==================== 工具函数 ====================
 def to_simplified(text):
     if zhconv and text:
         try:
@@ -59,35 +48,6 @@ def to_simplified(text):
         except Exception:
             pass
     return text
-
-def parse_pub_time(entry):
-    """尝试解析 RSS 条目的发布时间，返回 UNIX 时间戳或 None"""
-    for key in ("published_parsed", "updated_parsed"):
-        t = getattr(entry, key, None)
-        if t:
-            try:
-                return time.mktime(t)
-            except Exception:
-                pass
-    # 尝试解析 published 字符串
-    for key in ("published", "updated", "pubDate"):
-        s = getattr(entry, key, None)
-        if s:
-            try:
-                import email.utils
-                t = email.utils.parsedate_to_datetime(s)
-                if t:
-                    return t.timestamp()
-            except Exception:
-                pass
-    return None
-
-def is_recent(pub_ts, max_seconds=HOURS_24):
-    """发布时间是否在最近 max_seconds 内"""
-    if pub_ts is None:
-        return True  # 无法判断时间，保留
-    now = time.time()
-    return (now - pub_ts) <= max_seconds
 
 def smart_truncate(text, max_chars=50):
     text = text.strip()
@@ -102,7 +62,100 @@ def smart_truncate(text, max_chars=50):
             return snippet[:i + 1]
     return snippet
 
-def fetch_news(sources, max_items=6, max_age_hours=24):
+def parse_pub_time(entry):
+    for key in ("published_parsed", "updated_parsed"):
+        t = getattr(entry, key, None)
+        if t:
+            try:
+                return time.mktime(t)
+            except Exception:
+                pass
+    for key in ("published", "updated", "pubDate"):
+        s = getattr(entry, key, None)
+        if s:
+            try:
+                import email.utils
+                t = email.utils.parsedate_to_datetime(s)
+                if t:
+                    return t.timestamp()
+            except Exception:
+                pass
+    return None
+
+# ==================== 知乎热榜（国内） ====================
+def fetch_zhihu_hot(max_items=6):
+    """抓取知乎热榜，作为国内新闻源"""
+    try:
+        url = "https://www.zhihu.com/api/v3/feed/topstory/hot-lists/total?limit=50"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            print(f"   知乎热榜: HTTP {resp.status_code}")
+            return []
+        data = resp.json()
+        items = data.get("data", [])[:max_items]
+        result = []
+        for item in items:
+            target = item.get("target", {})
+            title = target.get("title", "").strip()
+            url_link = target.get("url", "") or f"https://www.zhihu.com/question/{target.get('id', '')}"
+            excerpt = target.get("excerpt", "") or title
+            excerpt = smart_truncate(to_simplified(excerpt), 50)
+            if not excerpt:
+                excerpt = title[:50]
+            if title:
+                result.append({
+                    "title": to_simplified(title)[:30],
+                    "link": url_link,
+                    "summary": excerpt,
+                    "source": "知乎热榜",
+                })
+        print(f"   知乎热榜: 获取到 {len(result)} 条")
+        return result
+    except Exception as e:
+        print(f"   知乎热榜异常: {e}")
+        return []
+
+# ==================== 百度热搜（备选） ====================
+def fetch_baidu_hot(max_items=6):
+    try:
+        url = "https://top.baidu.com/board?tab=realtime"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code != 200:
+            return []
+        text = resp.text
+        # 从页面中提取热搜标题
+        matches = re.findall(r'"query":"([^"]+)"', text)
+        result = []
+        for i, title in enumerate(matches[:max_items]):
+            result.append({
+                "title": to_simplified(title)[:30],
+                "link": f"https://www.baidu.com/s?wd={requests.utils.quote(title)}",
+                "summary": title[:50],
+                "source": "百度热搜",
+            })
+        print(f"   百度热搜: 获取到 {len(result)} 条")
+        return result
+    except Exception as e:
+        print(f"   百度热搜异常: {e}")
+        return []
+
+# ==================== RSS 新闻 ====================
+NEWS_SOURCES_DOMESTIC = [
+    {"name": "人民网政治", "url": "http://www.people.com.cn/rss/politics.xml"},
+    {"name": "人民网社会", "url": "http://www.people.com.cn/rss/society.xml"},
+]
+
+NEWS_SOURCES_INTERNATIONAL = [
+    {"name": "人民网国际", "url": "http://www.people.com.cn/rss/world.xml"},
+]
+
+def fetch_rss_news(sources, max_items=6, max_age_hours=48):
+    """抓取 RSS 新闻，带时间过滤"""
     all_items = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
     cutoff = time.time() - max_age_hours * 3600
@@ -111,13 +164,13 @@ def fetch_news(sources, max_items=6, max_age_hours=24):
         try:
             print(f"   抓取 [{source['name']}]...")
             resp = requests.get(source["url"], headers=headers, timeout=15)
+            print(f"     HTTP状态: {resp.status_code}, 内容长度: {len(resp.content)}")
             if resp.status_code != 200:
-                print(f"     失败: HTTP {resp.status_code}")
                 continue
             feed = feedparser.parse(resp.content)
-            print(f"     获取到 {len(feed.entries)} 条，过滤最近 {max_age_hours}h")
+            print(f"     解析到 {len(feed.entries)} 条条目")
             count = 0
-            for entry in feed.entries:
+            for entry in feed.entries[:max_items * 3]:
                 title = html.unescape(entry.get("title", "").strip())
                 title = to_simplified(title)
                 link = entry.get("link", "")
@@ -129,10 +182,11 @@ def fetch_news(sources, max_items=6, max_age_hours=24):
                 if not desc:
                     desc = title[:50]
 
-                # 时间过滤
+                # 时间过滤（宽松的：最多保留48小时，RSS没时间戳也保留）
                 pub_ts = parse_pub_time(entry)
                 if pub_ts and pub_ts < cutoff:
-                    continue  # 太旧，跳过
+                    print(f"     跳过旧新闻: {title[:20]}... ({datetime.datetime.fromtimestamp(pub_ts).strftime('%m-%d %H:%M')})")
+                    continue
 
                 if title and link:
                     all_items.append({
@@ -144,7 +198,7 @@ def fetch_news(sources, max_items=6, max_age_hours=24):
                     count += 1
                 if len(all_items) >= max_items * 3:
                     break
-            print(f"     最近 {max_age_hours}h 内有 {count} 条")
+            print(f"     保留 {count} 条")
         except Exception as e:
             print(f"     异常: {e}")
             continue
@@ -196,13 +250,40 @@ def main():
     weather = get_weather()
     print(f"   天气: {weather}")
 
-    print("获取国内新闻（最近24小时）...")
-    domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=6, max_age_hours=24)
-    print(f"   国内: {len(domestic)} 条")
+    # 国内新闻：RSS + 知乎热榜
+    print("获取国内新闻...")
+    domestic_rss = fetch_rss_news(NEWS_SOURCES_DOMESTIC, max_items=6, max_age_hours=48)
+    domestic_zhihu = fetch_zhihu_hot(max_items=4)
+    domestic = domestic_rss + domestic_zhihu
+    # 去重
+    seen = set()
+    unique = []
+    for item in domestic:
+        key = item["title"][:15]
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+        if len(unique) >= 6:
+            break
+    domestic = unique[:6]
+    print(f"   国内总计: {len(domestic)} 条 (RSS {len(domestic_rss)}, 知乎 {len(domestic_zhihu)})")
 
-    print("获取国际新闻（最近24小时）...")
-    international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=6, max_age_hours=24)
-    print(f"   国际: {len(international)} 条")
+    # 国际新闻：RSS + 百度热搜
+    print("获取国际新闻...")
+    international_rss = fetch_rss_news(NEWS_SOURCES_INTERNATIONAL, max_items=6, max_age_hours=48)
+    international_baidu = fetch_baidu_hot(max_items=4)
+    international = international_rss + international_baidu
+    seen = set()
+    unique = []
+    for item in international:
+        key = item["title"][:15]
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+        if len(unique) >= 6:
+            break
+    international = unique[:6]
+    print(f"   国际总计: {len(international)} 条 (RSS {len(international_rss)}, 百度 {len(international_baidu)})")
 
     blessing = get_blessing()
 
