@@ -6,6 +6,7 @@ GitHub Actions — 每日新闻早报
 import json
 import requests
 import datetime
+import time
 import feedparser
 import random
 import re
@@ -21,6 +22,7 @@ except ImportError:
 WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=5fafe6e6-bbc8-49fc-bb53-96c6dfc18d0b"
 CITY = "Beijing"
 TZ = timezone(timedelta(hours=8))
+HOURS_24 = 24 * 3600
 
 # ==================== 天气 ====================
 def get_weather():
@@ -34,18 +36,20 @@ def get_weather():
             info = re.sub(r'\s+', ' ', info).strip()
             return info if info else "天气数据获取中"
         return "天气数据获取中"
-    except Exception:
+    except Exception as e:
+        print(f"   天气获取失败: {e}")
         return "天气数据获取中"
 
 # ==================== 新闻 ====================
 NEWS_SOURCES_DOMESTIC = [
-    {"name": "澎湃新闻", "url": "https://www.thepaper.cn/rss.jsp"},
-    {"name": "央视新闻", "url": "https://news.cctv.com/data/rss_news.xml"},
-    {"name": "新华网", "url": "http://www.xinhuanet.com/politics/news_politics.xml"},
+    {"name": "人民网政治", "url": "http://www.people.com.cn/rss/politics.xml"},
+    {"name": "人民网社会", "url": "http://www.people.com.cn/rss/society.xml"},
+    {"name": "澎湃新闻",   "url": "https://www.thepaper.cn/rss.jsp"},
 ]
 
 NEWS_SOURCES_INTERNATIONAL = [
-    {"name": "澎湃国际", "url": "https://www.thepaper.cn/rss.jsp"},
+    {"name": "人民网国际", "url": "http://www.people.com.cn/rss/world.xml"},
+    {"name": "联合早报中国", "url": "https://www.zaobao.com.sg/rss/realtime/china"},
 ]
 
 def to_simplified(text):
@@ -56,8 +60,36 @@ def to_simplified(text):
             pass
     return text
 
+def parse_pub_time(entry):
+    """尝试解析 RSS 条目的发布时间，返回 UNIX 时间戳或 None"""
+    for key in ("published_parsed", "updated_parsed"):
+        t = getattr(entry, key, None)
+        if t:
+            try:
+                return time.mktime(t)
+            except Exception:
+                pass
+    # 尝试解析 published 字符串
+    for key in ("published", "updated", "pubDate"):
+        s = getattr(entry, key, None)
+        if s:
+            try:
+                import email.utils
+                t = email.utils.parsedate_to_datetime(s)
+                if t:
+                    return t.timestamp()
+            except Exception:
+                pass
+    return None
+
+def is_recent(pub_ts, max_seconds=HOURS_24):
+    """发布时间是否在最近 max_seconds 内"""
+    if pub_ts is None:
+        return True  # 无法判断时间，保留
+    now = time.time()
+    return (now - pub_ts) <= max_seconds
+
 def smart_truncate(text, max_chars=50):
-    """在句末标点处截断，避免砍断句子"""
     text = text.strip()
     if len(text) <= max_chars:
         return text
@@ -70,18 +102,22 @@ def smart_truncate(text, max_chars=50):
             return snippet[:i + 1]
     return snippet
 
-def fetch_news(sources, max_items=6):
+def fetch_news(sources, max_items=6, max_age_hours=24):
     all_items = []
     headers = {"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"}
+    cutoff = time.time() - max_age_hours * 3600
 
     for source in sources:
         try:
+            print(f"   抓取 [{source['name']}]...")
             resp = requests.get(source["url"], headers=headers, timeout=15)
             if resp.status_code != 200:
+                print(f"     失败: HTTP {resp.status_code}")
                 continue
             feed = feedparser.parse(resp.content)
-            print(f"   源 [{source['name']}] 获取到 {len(feed.entries)} 条")
-            for entry in feed.entries[:max_items * 2]:
+            print(f"     获取到 {len(feed.entries)} 条，过滤最近 {max_age_hours}h")
+            count = 0
+            for entry in feed.entries:
                 title = html.unescape(entry.get("title", "").strip())
                 title = to_simplified(title)
                 link = entry.get("link", "")
@@ -92,6 +128,12 @@ def fetch_news(sources, max_items=6):
                 desc = smart_truncate(desc, 50)
                 if not desc:
                     desc = title[:50]
+
+                # 时间过滤
+                pub_ts = parse_pub_time(entry)
+                if pub_ts and pub_ts < cutoff:
+                    continue  # 太旧，跳过
+
                 if title and link:
                     all_items.append({
                         "title": title[:30],
@@ -99,10 +141,15 @@ def fetch_news(sources, max_items=6):
                         "summary": desc,
                         "source": source["name"],
                     })
+                    count += 1
+                if len(all_items) >= max_items * 3:
+                    break
+            print(f"     最近 {max_age_hours}h 内有 {count} 条")
         except Exception as e:
-            print(f"   源 [{source['name']}] 抓取失败: {e}")
+            print(f"     异常: {e}")
             continue
 
+    # 去重
     seen = set()
     unique = []
     for item in all_items:
@@ -141,19 +188,20 @@ def main():
     date_str = now.strftime("%Y年%m月%d日")
     weekdays = ["星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日"]
     weekday_str = weekdays[now.weekday()]
+    now_str = now.strftime("%H:%M")
 
-    print(f"执行时间: {date_str} {weekday_str}")
+    print(f"执行时间: {date_str} {weekday_str} {now_str}")
 
     print("获取天气...")
     weather = get_weather()
     print(f"   天气: {weather}")
 
-    print("获取国内新闻...")
-    domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=6)
+    print("获取国内新闻（最近24小时）...")
+    domestic = fetch_news(NEWS_SOURCES_DOMESTIC, max_items=6, max_age_hours=24)
     print(f"   国内: {len(domestic)} 条")
 
-    print("获取国际新闻...")
-    international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=6)
+    print("获取国际新闻（最近24小时）...")
+    international = fetch_news(NEWS_SOURCES_INTERNATIONAL, max_items=6, max_age_hours=24)
     print(f"   国际: {len(international)} 条")
 
     blessing = get_blessing()
@@ -161,7 +209,7 @@ def main():
     domestic_text = format_news_items(domestic)
     international_text = format_news_items(international)
 
-    markdown_content = f"""## 彭先生早报 | {date_str} {weekday_str}
+    markdown_content = f"""## 彭先生早报 | {date_str} {weekday_str} {now_str}
 
 **早上好！今天又是能量满满的一天**
 
